@@ -1,6 +1,6 @@
 import re
 from fastapi import FastAPI, Response
-import database
+import Personal_Finance_Tracker.database as database
 
 app = FastAPI(title="Free Open-Source Finance Gateway")
 
