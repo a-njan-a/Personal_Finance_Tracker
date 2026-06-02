@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import Personal_Finance_Tracker.database as database
+import database
 
 st.set_page_config(page_title="Personal Capital Engine", layout="wide")
 st.title("📱 My Wealth Dashboard")
