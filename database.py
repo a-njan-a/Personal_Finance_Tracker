@@ -58,10 +58,10 @@ def init_db():
     cursor.close()
     conn.close()
 
-def insert_expense(sender, raw_text, amount, category, clean_description):
+def insert_expense(sender, raw_text, amount, category, clean_description, timestamp=datetime.now()):
     conn = get_connection()
     cursor = conn.cursor()
-    timestamp = datetime.now()
+    # timestamp = datetime.now()
     cursor.execute("""
         INSERT INTO expenses (timestamp, sender, raw_text, amount, category, clean_description)
         VALUES (%s, %s, %s, %s, %s, %s)

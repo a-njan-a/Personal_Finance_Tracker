@@ -125,7 +125,8 @@ async def whatsapp_webhook(request: Request):
                     raw_text=body_text,
                     amount=parsed["amount"],
                     category=parsed["category"],
-                    clean_description=parsed["clean_description"]
+                    clean_description=parsed["clean_description"],
+                    timestamp=parsed["date"]
                 )
                 print(f"💾 Cloud DB Logged: {parsed['clean_description']} | ₹{parsed['amount']}")
             else:
