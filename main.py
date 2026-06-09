@@ -1,6 +1,7 @@
 import re
 from fastapi import FastAPI, Response, Request, Query, HTTPException
 from fastapi.responses import PlainTextResponse
+from dateparser.search import search_dates
 import os
 import sys
 
@@ -18,40 +19,60 @@ app = FastAPI(title="Cloud Native Finance Gateway")
 MY_VERIFY_TOKEN = os.environ.get("MY_VERIFY_TOKEN")
 
 CATEGORY_KEYWORDS = {
-    "Food & Dining": ["swiggy", "zomato", "starbucks", "restaurant", "grocery", "blinkit", "zepto", "food", "cafe", "dine"],
+    "Food & Dining": ["swiggy", "zomato", "starbucks", "restaurant", "grocery", "blinkit", "zepto", "food", "cafe", "dine","instamart"],
     "Fuel & Travel": ["petrol", "uber", "ola", "auto", "flight", "diesel", "cab", "irctc", "train"],
     "Rent & Bills": ["rent", "electricity", "wifi", "ebill", "maid", "recharge", "jio", "airtel", "insurance"],
     "Shopping": ["amazon", "myntra", "flipkart", "clothes", "mall", "zara", "ajio"]
 }
 
 def rule_based_parse(text: str):
-    """Extracts numeric values and matches predefined spending categories."""
+    """Extract amount, category, description, and date."""
+
+    # Extract date
+    extracted_date = None
+
+    date_matches = search_dates(
+        text,
+        settings={
+            "PREFER_DATES_FROM": "past",
+            "DATE_ORDER": "DMY"
+        }
+    )
+
+    if date_matches:
+        # Take first detected date
+        extracted_date = date_matches[0][1]
+
+    # Extract amount
     amounts = re.findall(r'\d+(?:\.\d+)?', text)
     if not amounts:
         return None
-    
+
     amount = float(amounts[0])
+
     text_lowercase = text.lower()
-    
+
     assigned_category = "Other"
     clean_description = "Unclassified Expense"
-    
+
     for category, keywords in CATEGORY_KEYWORDS.items():
         for keyword in keywords:
-            if keyword in text_lowercase:
+            if keyword.lower() in text_lowercase:
                 assigned_category = category
                 clean_description = keyword.capitalize()
                 break
+
         if assigned_category != "Other":
             break
-            
+
     if assigned_category == "Other":
         alpha_chunks = re.findall(r'[a-zA-Z]+', text)
         if alpha_chunks:
             clean_description = " ".join(alpha_chunks[:2]).capitalize()
-            
+
     return {
         "amount": amount,
+        "date": extracted_date.strftime("%Y-%m-%d") if extracted_date else None,
         "category": assigned_category,
         "clean_description": clean_description
     }
