@@ -167,3 +167,60 @@ with tab_zerodha:
         fig_tree = px.treemap(df_portfolio, path=["symbol"], values="current_value", title="Asset Weight Distribution Profile")
         st.plotly_chart(fig_tree, use_container_width=True)
         st.dataframe(df_portfolio.sort_values(by="current_value", ascending=False), use_container_width=True)
+
+# --- SIDEBAR: MANUAL DATA INGESTION FORM ---
+st.sidebar.markdown("---")
+st.sidebar.header("📝 Manual Transaction Entry")
+
+# Using st.form prevents the app from rerunning and flashing on every single keystroke
+with st.sidebar.form(key="manual_entry_form", clear_on_submit=True):
+    
+    # 1. Date Input
+    transaction_date = st.date_input("Transaction Date", value=pd.Timestamp.now().date())
+    transaction_time = st.time_input("Transaction Time", value=pd.Timestamp.now().time())
+    
+    # 2. Flow Type Selection
+    tx_type = st.selectbox("Transaction Type", options=["expense", "credit"])
+    
+    # 3. Numeric Amount
+    amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0, format="%.2f")
+    
+    # 4. Contextual Categories
+    available_categories = ["Income"] if tx_type == "credit" else list(database.CATEGORY_KEYWORDS.keys()) + ["Other"]
+    category = st.selectbox("Category", options=available_categories)
+    
+    # 5. Text Label
+    description = st.text_input("Clean Description", placeholder="e.g., Cash Withdrawal, Rent payout")
+    
+    # Submit Button
+    submit_button = st.form_submit_button(label="🚀 Log to Cloud Database")
+
+# --- FORM SUBMISSION PROCESSING LOGIC ---
+if submit_button:
+    if amount <= 0:
+        st.sidebar.error("Amount must be greater than ₹0.00")
+    elif not description.strip():
+        st.sidebar.error("Please provide a description label.")
+    else:
+        try:
+            # Combine date and time inputs into a single standard datetime object
+            combined_datetime = pd.Timestamp.combine(transaction_date, transaction_time)
+            
+            # Send data directly to your existing database engine function
+            database.insert_transaction(
+                sender="MANUAL_UI",  # Distinct tag so you can filter manual entries out if needed
+                raw_text=f"Manual Input: {description} for ₹{amount}",
+                amount=amount,
+                category=category,
+                clean_description=description.strip().capitalize(),
+                timestamp=combined_datetime,
+                transaction_type=tx_type
+            )
+            
+            st.sidebar.success(f"Successfully logged ₹{amount:,.2f} as {tx_type}!")
+            
+            # Rerun the app state to instantly pull the new row into your interactive charts
+            st.rerun()
+            
+        except Exception as e:
+            st.sidebar.error(f"Failed to submit entry to Neon: {e}")
