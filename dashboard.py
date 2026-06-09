@@ -172,30 +172,32 @@ with tab_zerodha:
 st.sidebar.markdown("---")
 st.sidebar.header("📝 Manual Transaction Entry")
 
-# Using st.form prevents the app from rerunning and flashing on every single keystroke
-with st.sidebar.form(key="manual_entry_form", clear_on_submit=True):
-    
-    # 1. Date Input
-    transaction_date = st.date_input("Transaction Date", value=pd.Timestamp.now().date())
-    transaction_time = st.time_input("Transaction Time", value=pd.Timestamp.now().time())
-    
-    # 2. Flow Type Selection
-    tx_type = st.selectbox("Transaction Type", options=["expense", "credit"])
-    
-    # 3. Numeric Amount
-    amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0, format="%.2f")
-    
-    # 4. Contextual Categories
-    available_categories = ["Income"] if tx_type == "credit" else list(database.CATEGORY_KEYWORDS.keys()) + ["Other"]
-    category = st.selectbox("Category", options=available_categories)
-    
-    # 5. Text Label
-    description = st.text_input("Clean Description", placeholder="e.g., Cash Withdrawal, Rent payout")
-    
-    # Submit Button
-    submit_button = st.form_submit_button(label="🚀 Log to Cloud Database")
+# 1. Selection outside the form container allows instant category adaptation
+tx_type = st.sidebar.selectbox("Transaction Type", options=["expense", "credit"])
 
-# --- FORM SUBMISSION PROCESSING LOGIC ---
+# 2. Dynamically assign selection filters based on the transactional flow direction
+if tx_type == "credit":
+    available_categories = ["Income"]
+else:
+    try:
+        available_categories = list(database.CATEGORY_KEYWORDS.keys()) + ["Other"]
+    except AttributeError:
+        # Fallback security defaults
+        available_categories = ["Food & Dining", "Fuel & Travel", "Rent & Bills", "Shopping", "Other"]
+
+# 3. Form initialization block
+manual_form = st.sidebar.form(key="manual_entry_form", clear_on_submit=True)
+
+transaction_date = manual_form.date_input("Transaction Date", value=pd.Timestamp.now().date())
+transaction_time = manual_form.time_input("Transaction Time", value=pd.Timestamp.now().time())
+category = manual_form.selectbox("Category", options=available_categories)
+amount = manual_form.number_input("Amount (₹)", min_value=0.0, step=10.0, format="%.2f")
+description = manual_form.text_input("Clean Description", placeholder="e.g., Cash Withdrawal, Rent payout")
+
+# 4. Explicit form anchor registration
+submit_button = manual_form.form_submit_button(label="🚀 Log to Cloud Database")
+
+# 5. Form action processing
 if submit_button:
     if amount <= 0:
         st.sidebar.error("Amount must be greater than ₹0.00")
@@ -203,12 +205,10 @@ if submit_button:
         st.sidebar.error("Please provide a description label.")
     else:
         try:
-            # Combine date and time inputs into a single standard datetime object
             combined_datetime = pd.Timestamp.combine(transaction_date, transaction_time)
             
-            # Send data directly to your existing database engine function
             database.insert_transaction(
-                sender="MANUAL_UI",  # Distinct tag so you can filter manual entries out if needed
+                sender="MANUAL_UI",  
                 raw_text=f"Manual Input: {description} for ₹{amount}",
                 amount=amount,
                 category=category,
@@ -218,8 +218,6 @@ if submit_button:
             )
             
             st.sidebar.success(f"Successfully logged ₹{amount:,.2f} as {tx_type}!")
-            
-            # Rerun the app state to instantly pull the new row into your interactive charts
             st.rerun()
             
         except Exception as e:
