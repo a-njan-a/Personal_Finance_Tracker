@@ -40,46 +40,113 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error handling document parsing sequence: {e}")
 
 # --- PULL RECORDS FOR CHARTS ---
-df_raw = database.get_all_expenses()
+df_raw = database.get_all_expenses()  # Contains both expenses and credits now
 df_portfolio = database.get_portfolio()
 
+# Standardize date field up front if data is available
+if not df_raw.empty:
+    df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"])
+    # Ensure backward compatibility: if transaction_type column is missing from older rows, default to 'expense'
+    if "transaction_type" not in df_raw.columns:
+        df_raw["transaction_type"] = "expense"
+    else:
+        df_raw["transaction_type"] = df_raw["transaction_type"].fillna("expense")
+
 tab_weekly, tab_monthly, tab_yearly, tab_zerodha = st.tabs([
-    "🗓️ Weekly Outflows", "📅 Monthly Summary", "📊 Yearly Macro Trends", "📈 Zerodha Holdings"
+    "🗓️ Weekly Cash Flow", "📅 Monthly Summary", "📊 Yearly Macro Trends", "📈 Zerodha Holdings"
 ])
 
-# 1. Weekly Outflows Tab
+# 1. Weekly Cash Flow Tab
 with tab_weekly:
     if df_raw.empty:
-        st.info("No expense entries detected.")
+        st.info("No transaction entries detected.")
     else:
-        df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"])
         df_raw["Week"] = df_raw["timestamp"].dt.to_period("W").astype(str)
-        weekly_df = df_raw.groupby(["Week", "category"])["amount"].sum().reset_index()
         
-        fig_week = px.bar(weekly_df, x="Week", y="amount", color="category", title="Outflows Split by Week")
+        # Group data by type to give top summary statistics
+        expenses_only = df_raw[df_raw["transaction_type"] == "expense"]
+        credits_only = df_raw[df_raw["transaction_type"] == "credit"]
+        
+        total_exp = expenses_only["amount"].sum()
+        total_cred = credits_only["amount"].sum()
+        net_flow = total_cred - total_exp
+        
+        # Overview Cards
+        w1, w2, w3 = st.columns(3)
+        w1.metric("Total Credits (Income)", f"₹{total_cred:,.2f}")
+        w2.metric("Total Expenses (Outflows)", f"₹{total_exp:,.2f}")
+        w3.metric("Net Cash Flow", f"₹{net_flow:,.2f}", delta=f"₹{net_flow:,.2f}")
+        
+        st.markdown("---")
+        
+        # Stacked bar chart showing inflow vs outflow trends per week
+        weekly_trend = df_raw.groupby(["Week", "transaction_type"])["amount"].sum().reset_index()
+        fig_week = px.bar(
+            weekly_trend, 
+            x="Week", 
+            y="amount", 
+            color="transaction_type", 
+            barmode="group",
+            title="Inflow (Credit) vs Outflow (Expense) Comparison",
+            color_discrete_map={"expense": "#EF553B", "credit": "#00CC96"}
+        )
         st.plotly_chart(fig_week, use_container_width=True)
-        st.dataframe(df_raw[["timestamp", "clean_description", "amount", "category"]].sort_values(by="timestamp", ascending=False), use_container_width=True)
+        
+        # Historical Ledger view with explicit transaction indicator
+        st.subheader("Transaction History Ledger")
+        st.dataframe(
+            df_raw[["timestamp", "transaction_type", "clean_description", "amount", "category"]]
+            .sort_values(by="timestamp", ascending=False), 
+            use_container_width=True
+        )
 
 # 2. Monthly Summary Tab
 with tab_monthly:
     if not df_raw.empty:
-        df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"])
         df_raw["Month"] = df_raw["timestamp"].dt.to_period("M").astype(str)
-        monthly_df = df_raw.groupby(["Month", "category"])["amount"].sum().reset_index()
         
-        selected_month = st.selectbox("Choose Month Partition", options=monthly_df["Month"].unique())
-        filtered_month = monthly_df[monthly_df["Month"] == selected_month]
+        selected_month = st.selectbox("Choose Month Partition", options=df_raw["Month"].unique())
+        month_data = df_raw[df_raw["Month"] == selected_month]
         
-        fig_pie = px.pie(filtered_month, values="amount", names="category", hole=0.4, title=f"Allocation Split: {selected_month}")
-        st.plotly_chart(fig_pie, use_container_width=True)
+        # Slices for Pie Charts
+        m_expenses = month_data[month_data["transaction_type"] == "expense"]
+        m_credits = month_data[month_data["transaction_type"] == "credit"]
+        
+        col_pie1, col_pie2 = st.columns(2)
+        
+        with col_pie1:
+            if not m_expenses.empty:
+                monthly_exp_grouped = m_expenses.groupby("category")["amount"].sum().reset_index()
+                fig_pie_exp = px.pie(monthly_exp_grouped, values="amount", names="category", hole=0.4, title=f"Expense Allocation: {selected_month}")
+                st.plotly_chart(fig_pie_exp, use_container_width=True)
+            else:
+                st.info("No expenses found for this month partition.")
+                
+        with col_pie2:
+            if not m_credits.empty:
+                monthly_cred_grouped = m_credits.groupby("category")["amount"].sum().reset_index()
+                fig_pie_cred = px.pie(monthly_cred_grouped, values="amount", names="category", hole=0.4, title=f"Income Allocation: {selected_month}", color_discrete_sequence=px.colors.qualitative.Pastel)
+                st.plotly_chart(fig_pie_cred, use_container_width=True)
+            else:
+                st.info("No credit streams found for this month partition.")
 
 # 3. Yearly Macro Trends Tab
 with tab_yearly:
     if not df_raw.empty:
-        df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"])
         df_raw["Month"] = df_raw["timestamp"].dt.to_period("M").astype(str)
-        yearly_df = df_raw.groupby(["Month"])["amount"].sum().reset_index()
-        fig_line = px.line(yearly_df, x="Month", y="amount", title="Burn Rate Trajectory Profile", markers=True)
+        
+        # Map separate structural line series for income vs burn rates
+        yearly_trends = df_raw.groupby(["Month", "transaction_type"])["amount"].sum().reset_index()
+        
+        fig_line = px.line(
+            yearly_trends, 
+            x="Month", 
+            y="amount", 
+            color="transaction_type",
+            title="Monthly Burn Rate vs Income Trajectory Profile", 
+            markers=True,
+            color_discrete_map={"expense": "#EF553B", "credit": "#00CC96"}
+        )
         st.plotly_chart(fig_line, use_container_width=True)
 
 # 4. Zerodha Performance Tab

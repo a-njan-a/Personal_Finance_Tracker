@@ -70,6 +70,28 @@ def insert_expense(sender, raw_text, amount, category, clean_description, timest
     cursor.close()
     conn.close()
 
+# Inside database.py
+
+def insert_transaction(sender, raw_text, amount, category, clean_description, timestamp=datetime.now(),transaction_type="expense"):
+    """Inserts a transaction (expense or credit) into the Neon PostgreSQL database."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    query = """
+    INSERT INTO expenses (timestamp, sender, raw_text, amount, category, clean_description, transaction_type)
+    VALUES (%s, %s, %s, %s, %s, %s, %s);
+    """
+    
+    try:
+        cursor.execute(query, (sender, raw_text, amount, category, clean_description, transaction_type))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Database insert failed: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
 def save_portfolio_row(symbol, qty, avg_cost, curr_val):
     """Saves or updates investment assets using PostgreSQL upsert syntax (ON CONFLICT)."""
     conn = get_connection()

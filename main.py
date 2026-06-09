@@ -21,18 +21,19 @@ MY_VERIFY_TOKEN = os.environ.get("MY_VERIFY_TOKEN")
 
 
 CATEGORY_KEYWORDS = {
-    "Food & Dining": ["swiggy", "zomato", "starbucks", "restaurant", "grocery", "blinkit", "zepto", "food", "cafe", "dine","instamart"],
+    "Food & Dining": ["swiggy", "zomato", "starbucks", "restaurant", "grocery", "blinkit", "zepto", "food", "cafe", "dine"],
     "Fuel & Travel": ["petrol", "uber", "ola", "auto", "flight", "diesel", "cab", "irctc", "train"],
     "Rent & Bills": ["rent", "electricity", "wifi", "ebill", "maid", "recharge", "jio", "airtel", "insurance"],
     "Shopping": ["amazon", "myntra", "flipkart", "clothes", "mall", "zara", "ajio"]
 }
 
+CREDIT_KEYWORDS = ["salary", "credited", "refund", "cashback", "received", "dividend", "interest", "income"]
+
 def rule_based_parse(text: str):
-    """Extract amount, category, description, and date."""
+    """Extract amount, date, category, description, and transaction type (expense/credit)."""
 
-    # Extract date
+    # 1. Extract date
     extracted_date = None
-
     date_matches = search_dates(
         text,
         settings={
@@ -46,38 +47,77 @@ def rule_based_parse(text: str):
         # Take first detected date
         extracted_date = date_matches[0][1]
 
-    # Extract amount
-    amounts = re.findall(r'\d+(?:\.\d+)?', text)
-    if not amounts:
-        return None
-
-    amount = float(amounts[0])
-
     text_lowercase = text.lower()
 
-    assigned_category = "Other"
-    clean_description = "Unclassified Expense"
-
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword.lower() in text_lowercase:
-                assigned_category = category
-                clean_description = keyword.capitalize()
-                break
-
-        if assigned_category != "Other":
+    # 2. Determine Transaction Type (Credit vs Expense)
+    transaction_type = "expense"
+    for word in CREDIT_KEYWORDS:
+        if word in text_lowercase:
+            transaction_type = "credit"
             break
 
+    # 3. Extract amount (Updated regex to handle both income and expenses)
+    if transaction_type == "credit":
+        amount_match = re.search(
+            r'\b(?:credited|received|refund|cashback|income)\s+(\d+(?:\.\d+)?)\b',
+            text,
+            re.IGNORECASE
+        )
+    else:
+        amount_match = re.search(
+            r'\b(?:paid|spent|pay|expense)\s+(\d+(?:\.\d+)?)\b',
+            text,
+            re.IGNORECASE
+        )
+
+    if amount_match:
+        amount = float(amount_match.group(1))
+    else:
+        # Fallback: first number not part of a detected date
+        amounts = re.findall(r'\d+(?:\.\d+)?', text)
+        if not amounts:
+            return None
+        amount = float(amounts[0])
+
+    # 4. Assign Category and Description based on Transaction Type
+    assigned_category = "Other"
+    clean_description = "Unclassified Expense" if transaction_type == "expense" else "Unclassified Credit"
+
+    if transaction_type == "credit":
+        assigned_category = "Income"
+        # Find which specific keyword matched to use as description
+        for word in CREDIT_KEYWORDS:
+            if word in text_lowercase:
+                clean_description = word.capitalize()
+                break
+    else:
+        # Standard rule-based category matching for expenses
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword.lower() in text_lowercase:
+                    assigned_category = category
+                    clean_description = keyword.capitalize()
+                    break
+            if assigned_category != "Other":
+                break
+
+    # Fallback description using text words if still classified as "Other"
     if assigned_category == "Other":
         alpha_chunks = re.findall(r'[a-zA-Z]+', text)
         if alpha_chunks:
-            clean_description = " ".join(alpha_chunks[:2]).capitalize()
+            # Exclude basic action keywords to keep descriptions descriptive
+            filtered_chunks = [w for w in alpha_chunks if w.lower() not in ['paid', 'spent', 'pay', 'credited', 'received']]
+            if filtered_chunks:
+                clean_description = " ".join(filtered_chunks[:2]).capitalize()
+            else:
+                clean_description = " ".join(alpha_chunks[:2]).capitalize()
 
     return {
         "amount": amount,
         "date": extracted_date.strftime("%Y-%m-%d %H:%M:%S") if extracted_date else None,
         "category": assigned_category,
-        "clean_description": clean_description
+        "clean_description": clean_description,
+        "transaction_type": transaction_type
     }
 
 @app.get("/webhook/whatsapp")
@@ -129,7 +169,8 @@ async def whatsapp_webhook(request: Request):
                     amount=parsed["amount"],
                     category=parsed["category"],
                     clean_description=parsed["clean_description"],
-                    timestamp=parsed["date"]
+                    timestamp=parsed["date"],
+                    transaction_type=parsed["transaction_type"]
                 )
                 print(f"💾 Cloud DB Logged: {parsed['clean_description']} | ₹{parsed['amount']}")
             else:
