@@ -1,8 +1,21 @@
 import re
-from fastapi import FastAPI, Response
-import Personal_Finance_Tracker.database as database
+from fastapi import FastAPI, Response, Request, Query, HTTPException
+from fastapi.responses import PlainTextResponse
+import os
+import sys
 
-app = FastAPI(title="Free Open-Source Finance Gateway")
+
+# Defensive Import to remain compatible with both local and cloud folder structures
+try:
+    import database
+except ModuleNotFoundError:
+    import Personal_Finance_Tracker.database as database
+
+app = FastAPI(title="Cloud Native Finance Gateway")
+
+# Change this to whatever secret string you want. You will type this into Meta's dashboard.
+# Update this line in your main.py file
+MY_VERIFY_TOKEN = os.environ.get("MY_VERIFY_TOKEN")
 
 CATEGORY_KEYWORDS = {
     "Food & Dining": ["swiggy", "zomato", "starbucks", "restaurant", "grocery", "blinkit", "zepto", "food", "cafe", "dine"],
@@ -12,6 +25,7 @@ CATEGORY_KEYWORDS = {
 }
 
 def rule_based_parse(text: str):
+    """Extracts numeric values and matches predefined spending categories."""
     amounts = re.findall(r'\d+(?:\.\d+)?', text)
     if not amounts:
         return None
@@ -42,25 +56,67 @@ def rule_based_parse(text: str):
         "clean_description": clean_description
     }
 
-# CHANGED: We now accept standard URL query string parameters instead of Form elements
+@app.get("/webhook/whatsapp")
+async def verify_meta_webhook(
+    hub_mode: str = Query(None, alias="hub.mode"),
+    hub_challenge: str = Query(None, alias="hub.challenge"),
+    hub_verify_token: str = Query(None, alias="hub.verify_token")
+):
+    """
+    STEP 1: Meta Handshake Verification.
+    Meta fires a GET request to verify this server actually belongs to you.
+    """
+    if hub_mode == "subscribe" and hub_verify_token == MY_VERIFY_TOKEN:
+        print("✅ Meta Webhook successfully verified!")
+        return PlainTextResponse(hub_challenge)
+    
+    print("❌ Webhook verification failed mismatch.")
+    raise HTTPException(status_code=403, detail="Verification token mismatch")
+
 @app.post("/webhook/whatsapp")
-async def whatsapp_webhook(Body: str, From: str):
-    print(f"\n[Bridge Webhook Ingest] Raw Text: '{Body}'")
+async def whatsapp_webhook(request: Request):
+    """
+    STEP 2: Real-time Ingest Pipeline.
+    Meta sends an asymmetrical nested JSON document here every time you send a text.
+    """
+    payload = await request.json()
     
-    parsed = rule_based_parse(Body)
-    
-    if parsed and parsed["amount"] > 0:
-        database.insert_expense(
-            sender=From,
-            raw_text=Body,
-            amount=parsed["amount"],
-            category=parsed["category"],
-            clean_description=parsed["clean_description"]
-        )
-        print(f"💾 Logged via Local Bridge: {parsed['clean_description']} | ₹{parsed['amount']}")
-    else:
-        print("⚠️ Entry skipped: Could not parse numeric amount pattern.")
+    # Safely navigate Meta's deeply nested payload layout to see if it contains a text message
+    try:
+        entry = payload.get("entry", [])[0]
+        change = entry.get("changes", [])[0]
+        value = change.get("value", {})
+        message_data = value.get("messages", [])[0]
         
+        # Make sure the incoming packet is a text message, not an image or a status update
+        if message_data.get("type") == "text":
+            body_text = message_data["text"]["body"]
+            sender_phone = message_data["from"]
+            
+            print(f"\n[Cloud Ingest] Text from {sender_phone}: '{body_text}'")
+            
+            # Execute parsing regex
+            parsed = rule_based_parse(body_text)
+            
+            if parsed and parsed["amount"] > 0:
+                database.insert_expense(
+                    sender=sender_phone,
+                    raw_text=body_text,
+                    amount=parsed["amount"],
+                    category=parsed["category"],
+                    clean_description=parsed["clean_description"]
+                )
+                print(f"💾 Cloud DB Logged: {parsed['clean_description']} | ₹{parsed['amount']}")
+            else:
+                print("⚠️ Entry skipped: No clear pattern.")
+                
+    except (IndexError, KeyError, TypeError):
+        # Meta sends delivery confirmations ("sent", "delivered", "read") through this exact same endpoint. 
+        # If the incoming payload doesn't look like a message text structure, we ignore it safely.
+        pass
+
+    # Meta strictly requires an HTTP 200 OK response to confirm you received the message.
+    # If you don't return this, Meta will repeatedly send the same text thinking your server is dead.
     return {"status": "success"}
 
 if __name__ == "__main__":
