@@ -4,6 +4,7 @@ from fastapi.responses import PlainTextResponse
 from dateparser.search import search_dates
 import os
 import sys
+from datetime import datetime
 
 
 # Defensive Import to remain compatible with both local and cloud folder structures
@@ -17,6 +18,7 @@ app = FastAPI(title="Cloud Native Finance Gateway")
 # Change this to whatever secret string you want. You will type this into Meta's dashboard.
 # Update this line in your main.py file
 MY_VERIFY_TOKEN = os.environ.get("MY_VERIFY_TOKEN")
+
 
 CATEGORY_KEYWORDS = {
     "Food & Dining": ["swiggy", "zomato", "starbucks", "restaurant", "grocery", "blinkit", "zepto", "food", "cafe", "dine","instamart"],
@@ -35,6 +37,7 @@ def rule_based_parse(text: str):
         text,
         settings={
             "PREFER_DATES_FROM": "past",
+            "RELATIVE_BASE": datetime.now(),
             "DATE_ORDER": "DMY"
         }
     )
@@ -72,7 +75,7 @@ def rule_based_parse(text: str):
 
     return {
         "amount": amount,
-        "date": extracted_date.strftime("%Y-%m-%d") if extracted_date else None,
+        "date": extracted_date.strftime("%Y-%m-%d %H:%M:%S") if extracted_date else None,
         "category": assigned_category,
         "clean_description": clean_description
     }
