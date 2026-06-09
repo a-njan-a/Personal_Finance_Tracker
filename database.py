@@ -83,7 +83,7 @@ def insert_transaction(sender, raw_text, amount, category, clean_description, ti
     """
     
     try:
-        cursor.execute(query, (sender, raw_text, amount, category, clean_description, transaction_type))
+        cursor.execute(query, (timestamp, sender, raw_text, amount, category, clean_description, transaction_type))
         conn.commit()
     except Exception as e:
         conn.rollback()
