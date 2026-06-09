@@ -163,7 +163,7 @@ async def whatsapp_webhook(request: Request):
             parsed = rule_based_parse(body_text)
             
             if parsed and parsed["amount"] > 0:
-                database.insert_expense(
+                database.insert_transaction(
                     sender=sender_phone,
                     raw_text=body_text,
                     amount=parsed["amount"],
